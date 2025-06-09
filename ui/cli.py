@@ -103,25 +103,25 @@ def get_user_feedback_on_sections(proposed_sections: list[dict], total_target_mi
     Displays proposed sections to the user and collects feedback.
     Returns feedback string or None if confirmed, and the current proposal.
     """
-    print("\n--- AI Proposed Section Structure ---") # [36]
-    current_total_estimate = 0 # [36]
-    for i, section in enumerate(proposed_sections): # [36]
-        print(f"{i+1}. Title: {section.get('title', 'N/A')} ({section.get('estimated_minutes', 'N/A')} min)") # [36]
-        print(f" Description: {section.get('description', 'N/A')}") # [36]
-        current_total_estimate += section.get('estimated_minutes', 0) # [36]
+    print("\n--- AI Proposed Section Structure ---")
+    current_total_estimate = 0
+    for i, section in enumerate(proposed_sections):
+        print(f"{i+1}. Title: {section.get('title', 'N/A')} ({section.get('estimated_minutes', 'N/A')} min)")
+        print(f" Description: {section.get('description', 'N/A')}")
+        current_total_estimate += section.get('estimated_minutes', 0)
 
-    print(f"------------------------------------") # [37]
-    print(f"Sum of AI estimated minutes: {current_total_estimate} (Your overall target was: {total_target_minutes})") # [37]
-    print("\nReview the proposed sections. You can type 'confirm' or provide feedback to adjust, e.g.:") # [37]
-    print(" 'keep 1,3, remove 2, title of 1 is New Title A, time of 1 is 12, time of 3 is 13'") # [37]
-    print(" 'reorder to 2,1,3' or 'section 1 needs to cover XYZ and be 15 minutes'") # [37]
-    print(" 'break up section 2 into Early Years (5 min) and Later Years (7 min)'") # [38]
+    print(f"------------------------------------")
+    print(f"Sum of AI estimated minutes: {current_total_estimate} (Your overall target was: {total_target_minutes})")
+    print("\nReview the proposed sections. You can type 'confirm' or provide feedback to adjust, e.g.:")
+    print(" 'keep 1,3, remove 2, title of 1 is New Title A, time of 1 is 12, time of 3 is 13'")
+    print(" 'reorder to 2,1,3' or 'section 1 needs to cover XYZ and be 15 minutes'")
+    print(" 'break up section 2 into Early Years (5 min) and Later Years (7 min)'")
 
-    feedback = input("Your feedback (or 'confirm'): ").strip() # [38]
+    feedback = input("Your feedback (or 'confirm'): ").strip()
 
-    logging.info(f"User feedback on sections: '{feedback}'. Current proposal: {json.dumps(proposed_sections, indent=2)}") # Log proposal with feedback [38]
+    logging.info(f"User feedback on sections: '{feedback}'. Current proposal: {json.dumps(proposed_sections, indent=2)}") # Log proposal with feedback
 
-    if feedback.lower() == 'confirm': # [38]
-        return None, proposed_sections # [38] # None indicates confirmation
+    if feedback.lower() == 'confirm':
+        return None, proposed_sections # None indicates confirmation
 
-    return feedback, proposed_sections # [38]
+    return feedback, proposed_sections
