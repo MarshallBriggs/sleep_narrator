@@ -7,19 +7,49 @@ import argparse  # For command line argument parsing
 import google.generativeai as genai
 from google.ai.generativelanguage_v1beta.types import GoogleSearchRetrieval
 from google.generativeai.types import Tool
+from pathlib import Path
 
 # Import modules from your project structure
-from config import settings
+from config import settings, tts_settings
 from utils import file_utils, logging_config, estimation_utils
 from ui import cli
 from api import gemini_client
 from logic import research, structuring, generation, stitching
+from tts.tts_manager import TTSManager
 
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Video Script Generator v2.8')
     parser.add_argument('--input-file', '-i', type=str, help='Path to a text file containing input parameters')
+    parser.add_argument('--no-tts', action='store_true', help='Skip TTS processing')
     return parser.parse_args()
+
+def process_tts(run_output_dir: str, script_files: list[Path]) -> None:
+    """
+    Process text-to-speech conversion for script sections.
+    
+    Args:
+        run_output_dir: Directory where the run output is stored
+        script_files: List of script section files to process
+    """
+    try:
+        # Initialize TTS manager with default config
+        tts_manager = TTSManager(run_output_dir, tts_settings.DEFAULT_TTS_CONFIG)
+        
+        # Process all script sections
+        results = tts_manager.process_script_sections(script_files)
+        
+        # Log results
+        if results:
+            logging.info(f"Successfully generated {len(results)} audio files")
+            for script_file, audio_file in results.items():
+                logging.info(f"Generated audio for {script_file}: {audio_file}")
+        else:
+            logging.warning("No audio files were generated")
+            
+    except Exception as e:
+        logging.error(f"TTS processing failed: {e}")
+        print(f"Error during TTS processing: {e}")
 
 def main():
     overall_start_time = time.time()
@@ -215,6 +245,32 @@ def main():
     logging.info(f"Final polished script saved to {final_script_output_path}")
     print(f"Final polished script saved to {final_script_output_path}")
 
+    # After script generation and stitching is complete, offer TTS processing
+    if not args.no_tts:
+        print("\nWould you like to convert the generated scripts to speech? (yes/no)")
+        tts_choice = input().lower().strip()
+        
+        if tts_choice in ['yes', 'y']:
+            tts_start_time = time.time()
+            # Find all script section files
+            script_files = list(Path(run_output_dir).glob("script_section_*.txt"))
+            logging.info(f"TTS processing list - {script_files}")
+            print(f"\nTTS processing list - {script_files}")
+            if script_files:
+                print("\nStarting text-to-speech conversion...")
+                process_tts(run_output_dir, script_files)
+                print("TTS processing complete. Audio files are in the 'audio_output' directory.")
+            else:
+                print("No script section files found for TTS processing.")
+
+            # Log completion
+            tts_end_time = time.time()
+            tts_total_time = tts_end_time - tts_start_time
+            logging.info(f"TTS processing completed in {tts_total_time:.2f} seconds")
+            print(f"\nTTS processing completed in {tts_total_time:.2f} seconds")
+
+        else:
+            print("Skipping TTS processing.")
 
     # --- Pipeline Complete - Final Reporting ---
     overall_end_time = time.time()

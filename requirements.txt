@@ -1,2 +1,3 @@
 python-dotenv
-google-generativeai
+google-generativeai>=0.3.0
+google-cloud-texttospeech>=2.14.0

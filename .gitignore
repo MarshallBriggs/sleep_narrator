@@ -85,3 +85,6 @@ BACKUPS/
 
 # Workspace files
 *.code-workspace
+
+# Keys files
+keys/*
