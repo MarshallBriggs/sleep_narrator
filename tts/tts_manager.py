@@ -1,10 +1,17 @@
 import os
 import json
-import subprocess
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 import base64
+import time
+import re
+import tempfile
+import wave
+from google.cloud import texttospeech
+from google.api_core import retry
+from google.api_core.exceptions import ServiceUnavailable, InternalServerError
+import shutil
 
 class TTSManager:
     """Manages text-to-speech conversion using Google Cloud TTS API."""
@@ -29,80 +36,145 @@ class TTSManager:
         self.speaking_rate = config.get("speaking_rate", 0.9)
         self.audio_encoding = config.get("audio_encoding", "LINEAR16")
         
-        # Ensure Google Cloud credentials are set
-        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not creds_path:
-            logging.error("GOOGLE_APPLICATION_CREDENTIALS environment variable not set")
-            raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set. Please set it to the path of your service account key file.")
-        logging.info(f"Found GOOGLE_APPLICATION_CREDENTIALS at: {creds_path}")
-        if not os.path.exists(creds_path):
-            logging.error(f"Google Cloud credentials file not found at: {creds_path}")
-            raise ValueError(f"Google Cloud credentials file not found at: {creds_path}")
-    
-    def _create_tts_request(self, text: str) -> Dict[str, Any]:
-        """Create the TTS API request payload."""
-        return {
-            "input": {
-                "markup": text
-            },
-            "voice": {
-                "languageCode": self.language_code,
-                "name": self.voice_name,
-                "voiceClone": {}
-            },
-            "audioConfig": {
-                "audioEncoding": self.audio_encoding,
-                "speakingRate": self.speaking_rate
-            }
-        }
-    
-    def _get_auth_token(self) -> str:
-        """Get Google Cloud authentication token."""
+        # Initialize Google Cloud TTS client
         try:
-            logging.info("Attempting to get Google Cloud auth token using gcloud CLI")
-            # Use full path to gcloud.cmd on Windows
-            gcloud_path = r"C:\Users\Marshall\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd"
-            gcloud_cmd = [gcloud_path, "auth", "print-access-token"]
-            logging.debug(f"Running command: {' '.join(gcloud_cmd)}")
-            result = subprocess.run(
-                gcloud_cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            logging.info("Successfully obtained auth token")
-            return result.stdout.strip()
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Failed to get auth token. Command output: {e.stdout}\nError: {e.stderr}")
+            self.client = texttospeech.TextToSpeechClient()
+            logging.info("Successfully initialized Google Cloud TTS client")
+        except Exception as e:
+            logging.error(f"Failed to initialize Google Cloud TTS client: {e}")
             raise
-        except FileNotFoundError:
-            logging.error("gcloud command not found. Is Google Cloud SDK installed and in PATH?")
-            raise
-    
-    def _get_project_id(self) -> str:
-        """Get Google Cloud project ID."""
+
+        # Track temp files for cleanup
+        self._temp_files: List[str] = []
+
+    def __del__(self):
+        """Cleanup temp files on object destruction."""
+        self._cleanup_temp_files()
+
+    def _cleanup_temp_files(self):
+        """Clean up any remaining temp files."""
+        for temp_path in self._temp_files:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception as e:
+                logging.warning(f"Failed to remove temp file {temp_path}: {e}")
+
+    def _create_tts_request(self, text: str) -> texttospeech.SynthesisInput:
+        """Create the TTS API request."""
+        return texttospeech.SynthesisInput(text=text)
+
+    def _get_voice(self) -> texttospeech.VoiceSelectionParams:
+        """Get voice selection parameters."""
+        return texttospeech.VoiceSelectionParams(
+            language_code=self.language_code,
+            name=self.voice_name
+        )
+
+    def _get_audio_config(self) -> texttospeech.AudioConfig:
+        """Get audio configuration parameters."""
+        return texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding[self.audio_encoding],
+            speaking_rate=self.speaking_rate
+        )
+
+    def _should_retry(self, exc: Exception) -> bool:
+        """Determine if an exception should trigger a retry."""
+        if isinstance(exc, (ServiceUnavailable, InternalServerError)):
+            return True
+        if isinstance(exc, Exception) and any(err in str(exc) for err in ['502', '503', '504']):
+            return True
+        return False
+
+    @retry.Retry(
+        predicate=_should_retry,
+        initial=30.0,  # Start with 30 second delay as per error message
+        maximum=120.0,  # Max 2 minute delay between retries
+        multiplier=1.5,  # More gradual backoff
+        deadline=600.0,  # 10 minute total timeout
+        on_retry=lambda retry_state: logging.info(
+            f"Retrying TTS request (attempt {retry_state.attempt}) after {retry_state.retry_delay:.1f}s delay"
+        )
+    )
+    def _synthesize_speech(self, text: str) -> bytes:
+        """Synthesize speech with retry logic for temporary errors."""
         try:
-            logging.info("Attempting to get Google Cloud project ID using gcloud CLI")
-            # Use full path to gcloud.cmd on Windows
-            gcloud_path = r"C:\Users\Marshall\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd"
-            gcloud_cmd = [gcloud_path, "config", "list", "--format=value(core.project)"]
-            logging.debug(f"Running command: {' '.join(gcloud_cmd)}")
-            result = subprocess.run(
-                gcloud_cmd,
-                capture_output=True,
-                text=True,
-                check=True
+            response = self.client.synthesize_speech(
+                input=self._create_tts_request(text),
+                voice=self._get_voice(),
+                audio_config=self._get_audio_config()
             )
-            project_id = result.stdout.strip()
-            logging.info(f"Successfully obtained project ID: {project_id}")
-            return project_id
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Failed to get project ID. Command output: {e.stdout}\nError: {e.stderr}")
+            return response.audio_content
+        except Exception as e:
+            logging.error(f"Error during speech synthesis: {e}")
             raise
-        except FileNotFoundError:
-            logging.error("gcloud command not found. Is Google Cloud SDK installed and in PATH?")
-            raise
-    
+
+    def _split_text_to_chunks(self, text: str, max_bytes: int = 2500) -> List[str]:
+        """
+        Split text into smaller chunks for TTS processing.
+        Uses a smaller max_bytes value to reduce likelihood of timeouts.
+        """
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        chunks = []
+        current = ''
+        
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+                
+            # If sentence itself is too long, forcibly split
+            if len(sentence.encode('utf-8')) > max_bytes:
+                logging.warning(f"A single sentence exceeds {max_bytes} bytes. Forcibly splitting.")
+                # Split by words
+                words = sentence.split()
+                forced = ''
+                for word in words:
+                    if len((forced + ' ' + word).encode('utf-8')) > max_bytes:
+                        if forced:
+                            chunks.append(forced.strip())
+                        forced = word
+                    else:
+                        forced = (forced + ' ' + word).strip()
+                if forced:
+                    chunks.append(forced.strip())
+                continue
+                
+            if len((current + ' ' + sentence).encode('utf-8')) > max_bytes:
+                if current:
+                    chunks.append(current.strip())
+                current = sentence
+            else:
+                current = (current + ' ' + sentence).strip()
+                
+        if current:
+            chunks.append(current.strip())
+            
+        return chunks
+
+    def _process_chunk(self, chunk: str, chunk_idx: int, total_chunks: int) -> Optional[str]:
+        """Process a single chunk of text and return the path to the temp audio file."""
+        chunk_bytes = len(chunk.encode('utf-8'))
+        logging.info(f"Processing chunk {chunk_idx+1}/{total_chunks} (size: {chunk_bytes} bytes)")
+        logging.debug(f"Chunk {chunk_idx+1} preview: {chunk[:100]!r}")
+        
+        try:
+            audio_content = self._synthesize_speech(chunk)
+            if not audio_content:
+                logging.error(f"No audio content received for chunk {chunk_idx+1}")
+                return None
+
+            temp_fd, temp_path = tempfile.mkstemp(suffix='.wav')
+            os.close(temp_fd)  # Close the file descriptor
+            with open(temp_path, "wb") as f:
+                f.write(audio_content)
+            self._temp_files.append(temp_path)
+            logging.info(f"Chunk {chunk_idx+1} audio saved to temp file: {temp_path}")
+            return temp_path
+            
+        except Exception as e:
+            logging.error(f"Exception during TTS processing for chunk {chunk_idx+1}: {e}")
+            return None
+
     def convert_text_to_speech(self, text: str, output_filename: str) -> Optional[str]:
         """
         Convert text to speech and save as audio file.
@@ -115,47 +187,60 @@ class TTSManager:
             Path to the generated audio file if successful, None otherwise
         """
         try:
-            # Prepare the request
-            request_data = self._create_tts_request(text)
-            auth_token = self._get_auth_token()
-            project_id = self._get_project_id()
+            text_bytes = len(text.encode('utf-8'))
+            if text_bytes > 2500:  # Reduced from 5000 to 2500
+                logging.info(f"Text is {text_bytes} bytes, chunking required.")
+                text_chunks = self._split_text_to_chunks(text)
+            else:
+                text_chunks = [text]
+
+            temp_files = []
+            failed_chunks = []
             
-            # Prepare curl command
-            curl_cmd = [
-                "curl", "-X", "POST",
-                "-H", "Content-Type: application/json",
-                "-H", f"X-Goog-User-Project: {project_id}",
-                "-H", f"Authorization: Bearer {auth_token}",
-                "--data", json.dumps(request_data),
-                "https://texttospeech.googleapis.com/v1/text:synthesize"
-            ]
-            
-            # Execute curl command
-            result = subprocess.run(
-                curl_cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            # Parse response and save audio
-            response = json.loads(result.stdout)
-            if "audioContent" not in response:
-                logging.error("No audio content in response")
+            # Process all chunks
+            for idx, chunk in enumerate(text_chunks):
+                temp_path = self._process_chunk(chunk, idx, len(text_chunks))
+                if temp_path:
+                    temp_files.append(temp_path)
+                else:
+                    failed_chunks.append((idx, chunk))
+
+            # Try failed chunks one more time after a delay
+            if failed_chunks:
+                logging.info(f"Retrying {len(failed_chunks)} failed chunks after delay...")
+                time.sleep(30)  # Wait 30 seconds before retrying
+                for idx, chunk in failed_chunks:
+                    temp_path = self._process_chunk(chunk, idx, len(text_chunks))
+                    if temp_path:
+                        temp_files.append(temp_path)
+
+            if not temp_files:
+                logging.error(f"No audio files were generated for {output_filename}.wav. See previous errors.")
                 return None
-            
-            # Save the audio file
+
             output_path = self.audio_output_dir / f"{output_filename}.wav"
-            with open(output_path, "wb") as f:
-                f.write(base64.b64decode(response["audioContent"]))
-            
-            logging.info(f"Successfully generated audio file: {output_path}")
+            try:
+                with wave.open(str(output_path), 'wb') as out_wav:
+                    for i, temp_path in enumerate(temp_files):
+                        with wave.open(temp_path, 'rb') as in_wav:
+                            if i == 0:
+                                out_wav.setparams(in_wav.getparams())
+                            out_wav.writeframes(in_wav.readframes(in_wav.getnframes()))
+                logging.info(f"Successfully generated audio file: {output_path}")
+            except Exception as e:
+                logging.error(f"Failed to concatenate audio chunks for {output_filename}.wav: {e}")
+                return None
+
+            if len(temp_files) < len(text_chunks):
+                logging.warning(f"Some chunks failed for {output_filename}.wav. Audio may be incomplete.")
             return str(output_path)
-            
+
         except Exception as e:
-            logging.error(f"Failed to convert text to speech: {e}")
+            logging.error(f"Failed to convert text to speech for {output_filename}: {e}")
             return None
-    
+        finally:
+            self._cleanup_temp_files()
+
     def process_script_sections(self, script_files: list[Path]) -> Dict[str, str]:
         """
         Process multiple script sections and convert them to audio.
@@ -167,10 +252,14 @@ class TTSManager:
             Dictionary mapping script filenames to their corresponding audio file paths
         """
         results = {}
-        logging.info(f"Starting to process {len(script_files)} script files")
-        for script_file in script_files:
+        total_files = len(script_files)
+        logging.info(f"Starting to process {total_files} script files")
+        print(f"Starting TTS processing for {total_files} files...")
+        for idx, script_file in enumerate(script_files, 1):
             try:
-                logging.info(f"Processing script file: {script_file}")
+                progress_msg = f"Processing {idx}/{total_files}: {script_file.name}"
+                print(progress_msg)
+                logging.info(progress_msg)
                 if not script_file.exists():
                     logging.error(f"Script file does not exist: {script_file}")
                     continue
@@ -185,17 +274,26 @@ class TTSManager:
                 audio_filename = script_file.stem
                 logging.info(f"Will save audio as: {audio_filename}.wav")
                 
-                # Convert to speech
+                # Convert to speech with timing
+                start_time = time.time()
                 audio_path = self.convert_text_to_speech(content, audio_filename)
+                end_time = time.time()
+                elapsed = end_time - start_time
                 if audio_path:
-                    logging.info(f"Successfully generated audio at: {audio_path}")
+                    success_msg = f"Successfully generated audio at: {audio_path} (Time: {elapsed:.2f}s)"
+                    print(success_msg)
+                    logging.info(success_msg)
                     results[str(script_file)] = audio_path
                 else:
-                    logging.error(f"Failed to generate audio for: {script_file}")
+                    fail_msg = f"Failed to generate audio for: {script_file} (Time: {elapsed:.2f}s)"
+                    print(fail_msg)
+                    logging.error(fail_msg)
                 
             except Exception as e:
                 logging.error(f"Failed to process script file {script_file}: {str(e)}", exc_info=True)
+                print(f"Exception while processing {script_file}: {e}")
                 continue
-        
-        logging.info(f"Completed processing {len(script_files)} files. Generated {len(results)} audio files.")
+        summary_msg = f"Completed processing {total_files} files. Generated {len(results)} audio files."
+        print(summary_msg)
+        logging.info(summary_msg)
         return results 
