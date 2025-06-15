@@ -261,6 +261,9 @@ class TTSManager:
         Returns:
             Dictionary mapping script filenames to their corresponding audio file paths
         """
+        # Sort script files by name to maintain order
+        script_files = sorted(script_files)
+        
         results = {}
         total_files = len(script_files)
         logging.info(f"Starting to process {total_files} script files")
@@ -280,8 +283,8 @@ class TTSManager:
                     content = f.read()
                 logging.info(f"Successfully read {len(content)} characters from {script_file}")
                 
-                # Generate audio filename from script filename
-                audio_filename = script_file.stem
+                # Generate audio filename from script filename, preserving the numerical prefix
+                audio_filename = script_file.stem  # This will keep the numerical prefix since it's part of the filename
                 logging.info(f"Will save audio as: {audio_filename}.wav")
                 
                 # Convert to speech with timing

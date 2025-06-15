@@ -195,9 +195,9 @@ def main():
 
     # --- Phase 3: Script Generation for Each Section ---
     generated_section_scripts_map = {} # Dict to store scripts by title
-    final_section_order = [sec['title'] for sec in confirmed_sections] # List of titles for ordering
+    final_section_order = [sec['title'] for sec in confirmed_sections]
 
-    for section_info in confirmed_sections: # Iterate through confirmed sections
+    for idx, section_info in enumerate(confirmed_sections, 1): # Iterate through confirmed sections with index
         title = section_info.get('title', 'Untitled Section')
         description = section_info.get('description', '')
         section_target_mins = section_info.get('estimated_minutes', 5) # Default to 5 min
@@ -219,9 +219,9 @@ def main():
 
         generated_section_scripts_map[title] = section_script # Store generated script
 
-        # Save individual section script
-        # Sanitize title for filename
-        section_filename = f"script_section_{re.sub(r'[^a-zA-Z0-9_]+', '', title.replace(' ','_'))[:50]}.txt"
+        # Save individual section script with numerical prefix
+        # Sanitize title for filename and add section number prefix
+        section_filename = f"{idx:02d}_script_section_{re.sub(r'[^a-zA-Z0-9_]+', '', title.replace(' ','_'))[:50]}.txt"
         file_utils.save_text_file(section_filename, section_script)
 
     # --- Phase 4: Stitching and Smoothing ---
@@ -254,8 +254,8 @@ def main():
         
         if run_tts:
             tts_start_time = time.time()
-            # Find all script section files
-            script_files = list(Path(run_output_dir).glob("script_section_*.txt"))
+            # Find all script section files - updated pattern to match new naming format
+            script_files = list(Path(run_output_dir).glob("[0-9][0-9]_script_section_*.txt"))
             logging.info(f"TTS processing list - {script_files}")
             print(f"\nTTS processing list - {script_files}")
             if script_files:
