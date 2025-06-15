@@ -58,7 +58,7 @@ class TTSManager:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
             except Exception as e:
-                logging.warning(f"Failed to remove temp file {temp_path}: {e}")
+                logging.debug(f"Failed to remove temp file {temp_path}: {e}")
 
     def _create_tts_request(self, text: str) -> texttospeech.SynthesisInput:
         """Create the TTS API request."""
@@ -92,8 +92,8 @@ class TTSManager:
         maximum=120.0,  # Max 2 minute delay between retries
         multiplier=1.5,  # More gradual backoff
         deadline=600.0,  # 10 minute total timeout
-        on_retry=lambda retry_state: logging.info(
-            f"Retrying TTS request (attempt {retry_state.attempt}) after {retry_state.retry_delay:.1f}s delay"
+        on_retry=lambda retry_state: logging.warning(
+            f"Retry {retry_state.attempt}/∞ after {retry_state.retry_delay:.0f}s"
         )
     )
     def _synthesize_speech(self, text: str) -> bytes:
@@ -106,7 +106,7 @@ class TTSManager:
             )
             return response.audio_content
         except Exception as e:
-            logging.error(f"Error during speech synthesis: {e}")
+            logging.error(f"TTS synthesis failed: {e}")
             raise
 
     def _split_text_to_chunks(self, text: str, max_bytes: int = 2500) -> List[str]:
