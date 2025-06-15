@@ -2,7 +2,7 @@ import logging
 import json # Imported for json.dumps for logging/display in feedback section
 import os
 
-def read_inputs_from_file(file_path: str) -> tuple[str | None, int | None, float | None, str | None]:
+def read_inputs_from_file(file_path: str) -> tuple[str | None, int | None, float | None, str | None, bool | None]:
     """Reads initial inputs from a text file. Each input should be on a new line."""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -11,7 +11,7 @@ def read_inputs_from_file(file_path: str) -> tuple[str | None, int | None, float
         if len(lines) < 4:
             logging.error(f"Input file {file_path} has insufficient lines. Need at least 4 lines.")
             print(f"ERROR: Input file {file_path} has insufficient lines. Need at least 4 lines.")
-            return None, None, None, None
+            return None, None, None, None, None
             
         topic = lines[0]
         direction = lines[1]
@@ -21,34 +21,41 @@ def read_inputs_from_file(file_path: str) -> tuple[str | None, int | None, float
             if total_target_minutes <= 0:
                 logging.error(f"Invalid minutes value in input file: {total_target_minutes}")
                 print(f"ERROR: Invalid minutes value in input file: {total_target_minutes}")
-                return None, None, None, None
+                return None, None, None, None, None
         except ValueError:
             logging.error(f"Invalid minutes value in input file: {lines[2]}")
             print(f"ERROR: Invalid minutes value in input file: {lines[2]}")
-            return None, None, None, None
+            return None, None, None, None, None
             
         try:
             research_influence = float(lines[3])
             if not 0.0 <= research_influence <= 1.0:
                 logging.error(f"Invalid research influence value in input file: {research_influence}")
                 print(f"ERROR: Invalid research influence value in input file: {research_influence}")
-                return None, None, None, None
+                return None, None, None, None, None
         except ValueError:
             logging.error(f"Invalid research influence value in input file: {lines[3]}")
             print(f"ERROR: Invalid research influence value in input file: {lines[3]}")
-            return None, None, None, None
+            return None, None, None, None, None
+
+        # Handle optional TTS setting (5th line)
+        run_tts = None
+        if len(lines) >= 5:
+            tts_choice = lines[4].lower().strip()
+            run_tts = tts_choice in ['yes', 'y', 'true', '1']
+            logging.info(f"TTS processing {'enabled' if run_tts else 'disabled'} from input file")
             
         user_topic_direction = f"Topic: {topic}\nDirection: {direction if direction.strip() else 'General overview'}"
-        logging.info(f"Read inputs from file: Topic/Direction='{user_topic_direction}', Total Length={total_target_minutes} min, Influence={research_influence}")
+        logging.info(f"Read inputs from file: Topic/Direction='{user_topic_direction}', Total Length={total_target_minutes} min, Influence={research_influence}, TTS={run_tts}")
         
-        return user_topic_direction, total_target_minutes, research_influence, topic
+        return user_topic_direction, total_target_minutes, research_influence, topic, run_tts
         
     except Exception as e:
         logging.error(f"Failed to read input file {file_path}: {e}", exc_info=True)
         print(f"ERROR: Failed to read input file {file_path}: {e}")
-        return None, None, None, None
+        return None, None, None, None, None
 
-def get_initial_user_inputs(input_file: str | None = None) -> tuple[str | None, int | None, float | None, str | None]:
+def get_initial_user_inputs(input_file: str | None = None) -> tuple[str | None, int | None, float | None, str | None, bool | None]:
     """
     Gets initial inputs either from a file or interactively.
     Args:
@@ -90,12 +97,13 @@ def get_initial_user_inputs(input_file: str | None = None) -> tuple[str | None, 
     if not topic.strip():
         logging.warning("User provided an empty topic.")
         print("WARNING: Topic cannot be empty.")
-        return None, None, None, None
+        return None, None, None, None, None
 
     user_topic_direction = f"Topic: {topic}\nDirection: {direction if direction.strip() else 'General overview'}"
     logging.info(f"User inputs: Topic/Direction='{user_topic_direction}', Total Length={total_target_minutes} min, Influence={research_influence}")
 
-    return user_topic_direction, total_target_minutes, research_influence, topic
+    # For interactive mode, we don't set TTS preference here - it will be asked after script generation
+    return user_topic_direction, total_target_minutes, research_influence, topic, None
 
 
 def get_user_feedback_on_sections(proposed_sections: list[dict], total_target_minutes: int) -> tuple[str | None, list[dict]]:

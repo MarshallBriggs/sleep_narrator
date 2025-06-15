@@ -12,6 +12,16 @@ from google.cloud import texttospeech
 from google.api_core import retry
 from google.api_core.exceptions import ServiceUnavailable, InternalServerError
 import shutil
+from config.settings import (
+    DEFAULT_TTS_CONFIG,
+    TTS_MIN_SPEAKING_RATE,
+    TTS_MAX_SPEAKING_RATE,
+    TTS_CHUNK_SIZE_BYTES,
+    TTS_RETRY_INITIAL_DELAY,
+    TTS_RETRY_MAX_DELAY,
+    TTS_RETRY_MULTIPLIER,
+    TTS_RETRY_DEADLINE,
+)
 
 class TTSManager:
     """Manages text-to-speech conversion using Google Cloud TTS API."""
@@ -30,11 +40,11 @@ class TTSManager:
         logging.info(f"Creating audio output directory at: {self.audio_output_dir}")
         self.audio_output_dir.mkdir(exist_ok=True)
         
-        # TTS configuration
-        self.voice_name = config.get("voice_name", "en-US-Chirp3-HD-Enceladus")
-        self.language_code = config.get("language_code", "en-US")
-        self.speaking_rate = config.get("speaking_rate", 0.9)
-        self.audio_encoding = config.get("audio_encoding", "LINEAR16")
+        # TTS configuration - use provided config or fall back to defaults
+        self.voice_name = config.get("voice_name", DEFAULT_TTS_CONFIG["voice_name"])
+        self.language_code = config.get("language_code", DEFAULT_TTS_CONFIG["language_code"])
+        self.speaking_rate = config.get("speaking_rate", DEFAULT_TTS_CONFIG["speaking_rate"])
+        self.audio_encoding = config.get("audio_encoding", DEFAULT_TTS_CONFIG["audio_encoding"])
         
         # Initialize Google Cloud TTS client
         try:
@@ -88,10 +98,10 @@ class TTSManager:
 
     @retry.Retry(
         predicate=_should_retry,
-        initial=30.0,  # Start with 30 second delay as per error message
-        maximum=120.0,  # Max 2 minute delay between retries
-        multiplier=1.5,  # More gradual backoff
-        deadline=600.0,  # 10 minute total timeout
+        initial=TTS_RETRY_INITIAL_DELAY,
+        maximum=TTS_RETRY_MAX_DELAY,
+        multiplier=TTS_RETRY_MULTIPLIER,
+        deadline=TTS_RETRY_DEADLINE,
         on_retry=lambda retry_state: logging.warning(
             f"Retry {retry_state.attempt}/∞ after {retry_state.retry_delay:.0f}s"
         )
@@ -109,7 +119,7 @@ class TTSManager:
             logging.error(f"TTS synthesis failed: {e}")
             raise
 
-    def _split_text_to_chunks(self, text: str, max_bytes: int = 2500) -> List[str]:
+    def _split_text_to_chunks(self, text: str, max_bytes: int = TTS_CHUNK_SIZE_BYTES) -> List[str]:
         """
         Split text into smaller chunks for TTS processing.
         Uses a smaller max_bytes value to reduce likelihood of timeouts.
@@ -188,7 +198,7 @@ class TTSManager:
         """
         try:
             text_bytes = len(text.encode('utf-8'))
-            if text_bytes > 2500:  # Reduced from 5000 to 2500
+            if text_bytes > TTS_CHUNK_SIZE_BYTES:
                 logging.info(f"Text is {text_bytes} bytes, chunking required.")
                 text_chunks = self._split_text_to_chunks(text)
             else:

@@ -10,7 +10,7 @@ from google.generativeai.types import Tool
 from pathlib import Path
 
 # Import modules from your project structure
-from config import settings, tts_settings
+from config import settings
 from utils import file_utils, logging_config, estimation_utils
 from ui import cli
 from api import gemini_client
@@ -34,7 +34,7 @@ def process_tts(run_output_dir: str, script_files: list[Path]) -> None:
     """
     try:
         # Initialize TTS manager with default config
-        tts_manager = TTSManager(run_output_dir, tts_settings.DEFAULT_TTS_CONFIG)
+        tts_manager = TTSManager(run_output_dir, settings.DEFAULT_TTS_CONFIG)
         
         # Process all script sections
         results = tts_manager.process_script_sections(script_files)
@@ -58,7 +58,7 @@ def main():
     args = parse_arguments()
 
     # Get initial user inputs via CLI or file
-    user_topic_direction, total_target_minutes, research_influence, raw_topic_title = cli.get_initial_user_inputs(args.input_file)
+    user_topic_direction, total_target_minutes, research_influence, raw_topic_title, run_tts = cli.get_initial_user_inputs(args.input_file)
 
     if not user_topic_direction or total_target_minutes is None or research_influence is None: 
         logging.warning("No valid user inputs.")
@@ -245,12 +245,14 @@ def main():
     logging.info(f"Final polished script saved to {final_script_output_path}")
     print(f"Final polished script saved to {final_script_output_path}")
 
-    # After script generation and stitching is complete, offer TTS processing
+    # After script generation and stitching is complete, handle TTS processing
     if not args.no_tts:
-        print("\nWould you like to convert the generated scripts to speech? (yes/no)")
-        tts_choice = input().lower().strip()
+        if run_tts is None:  # Interactive mode - ask user
+            print("\nWould you like to convert the generated scripts to speech? (yes/no)")
+            tts_choice = input().lower().strip()
+            run_tts = tts_choice in ['yes', 'y']
         
-        if tts_choice in ['yes', 'y']:
+        if run_tts:
             tts_start_time = time.time()
             # Find all script section files
             script_files = list(Path(run_output_dir).glob("script_section_*.txt"))
@@ -268,7 +270,6 @@ def main():
             tts_total_time = tts_end_time - tts_start_time
             logging.info(f"TTS processing completed in {tts_total_time:.2f} seconds")
             print(f"\nTTS processing completed in {tts_total_time:.2f} seconds")
-
         else:
             print("Skipping TTS processing.")
 

@@ -8,10 +8,7 @@ from google.ai.generativelanguage_v1beta.types import GoogleSearchRetrieval
 # Load environment variables
 load_dotenv()
 
-# --- Configuration Constants ---
-# These constants define model names, system instructions, and generation parameters
-# for the different stages of the script generation pipeline.
-
+# --- Gemini AI Configuration ---
 GEMINI_MODEL_NAME = "gemini-1.5-flash-latest"
 
 # System instructions for the Narrative Script Generator (Narrator Persona)
@@ -65,33 +62,72 @@ Example: [{"title": "Early Life", "description": "Exploring the protagonist's fo
 """
 
 # Gemini Generation Configuration Objects
-# These set parameters like temperature, max_output_tokens, top_p, top_k for different API calls.
 RESEARCH_GENERATION_CONFIG = GeminiGenerationConfig(temperature=0.2, max_output_tokens=7000, top_p=0.9, top_k=40)
 SECTION_PROPOSAL_CONFIG = GeminiGenerationConfig(temperature=0.6, max_output_tokens=2048, top_p=0.9, top_k=40, response_mime_type="application/json")
 SCRIPT_SECTION_GENERATION_CONFIG_BASE = GeminiGenerationConfig(temperature=0.25, top_p=0.9, top_k=40)
-STITCHING_CONFIG = GeminiGenerationConfig(temperature=0.25, max_output_tokens=8192, top_p=0.9, top_k=40) # Default, can be overridden
+STITCHING_CONFIG = GeminiGenerationConfig(temperature=0.25, max_output_tokens=8192, top_p=0.9, top_k=40)
 
+# --- Text-to-Speech Configuration ---
+# Default TTS settings
+DEFAULT_TTS_CONFIG = {
+    "voice_name": "en-US-Chirp3-HD-Enceladus",  # Google Cloud TTS voice name
+    "language_code": "en-US",                   # Language code
+    "speaking_rate": 0.9,                       # Speaking rate (0.25 to 4.0)
+    "audio_encoding": "LINEAR16",               # Audio encoding format
+}
+
+# Available voice options
+AVAILABLE_VOICES = {
+    "en-US": [
+        "en-US-Chirp3-HD-Enceladus",  # Default
+        "en-US-Neural2-A",
+        "en-US-Neural2-C",
+        "en-US-Neural2-D",
+        "en-US-Neural2-E",
+        "en-US-Neural2-F",
+        "en-US-Neural2-G",
+        "en-US-Neural2-H",
+        "en-US-Neural2-I",
+        "en-US-Neural2-J",
+    ]
+}
+
+# Audio encoding options
+AUDIO_ENCODING_OPTIONS = [
+    "LINEAR16",    # Uncompressed 16-bit signed little-endian samples
+    "MP3",         # MP3 audio
+    "OGG_OPUS",    # Ogg Opus audio
+    "MULAW",       # 8-bit samples that compand 14-bit audio samples using μ-law
+    "ALAW",        # 8-bit samples that compand 14-bit audio samples using A-law
+]
+
+# TTS Processing Limits
+TTS_MIN_SPEAKING_RATE = 0.25
+TTS_MAX_SPEAKING_RATE = 4.0
+TTS_CHUNK_SIZE_BYTES = 2500  # Maximum bytes per TTS request
+TTS_RETRY_INITIAL_DELAY = 30.0  # Initial retry delay in seconds
+TTS_RETRY_MAX_DELAY = 120.0  # Maximum retry delay in seconds
+TTS_RETRY_MULTIPLIER = 1.5  # Retry delay multiplier
+TTS_RETRY_DEADLINE = 600.0  # Total timeout for retries in seconds
+
+# --- Script Generation Configuration ---
 # Dynamic Token Calculation & Length Estimation Constants
 USE_DYNAMIC_MAX_TOKENS_FOR_SCRIPT_SECTIONS = True
-TESTING_SCRIPT_SECTION_MAX_TOKENS = 1024 # Used if USE_DYNAMIC_MAX_TOKENS_FOR_SCRIPT_SECTIONS is False
+TESTING_SCRIPT_SECTION_MAX_TOKENS = 1024
+WORDS_PER_MINUTE_NARRATION = 140
+TOKENS_PER_WORD_ESTIMATE = 1.4
+TOKEN_BUFFER_PERCENTAGE = 0.30
+MODEL_ABSOLUTE_MAX_OUTPUT_TOKENS = 8192
+MODEL_CONTEXT_WINDOW_LIMIT = 1048576
+AVERAGE_WORDS_PER_PARAGRAPH_FOR_EXPANSION = 85
+SCRIPT_LENGTH_ACCEPTABLE_VARIANCE_MINUTES = 1.5
+MAX_ITERATIVE_EXPANSION_ATTEMPTS = 6
+MIN_SECTION_TIME_FOR_EXPANSION_PROMPT = 1.0
 
-WORDS_PER_MINUTE_NARRATION = 140 # Average speaking rate
-TOKENS_PER_WORD_ESTIMATE = 1.4 # Average tokens per English word for estimation
-TOKEN_BUFFER_PERCENTAGE = 0.30 # Buffer added to estimated tokens for safety
-
-MODEL_ABSOLUTE_MAX_OUTPUT_TOKENS = 8192 # Max output for Gemini 1.5 Flash (at the time of coding)
-MODEL_CONTEXT_WINDOW_LIMIT = 1048576 # For Gemini 1.5 Flash (1M tokens)
-
-AVERAGE_WORDS_PER_PARAGRAPH_FOR_EXPANSION = 85 # Estimate used for expansion prompts
-SCRIPT_LENGTH_ACCEPTABLE_VARIANCE_MINUTES = 1.5 # Acceptable difference from target length for a section
-MAX_ITERATIVE_EXPANSION_ATTEMPTS = 6 # Limit on how many times to try expanding a section
-MIN_SECTION_TIME_FOR_EXPANSION_PROMPT = 1.0 # Don't try to expand sections already very short
-
-# Prompt Input Limits - Used to prevent exceeding model context window
-# (Using char limits as a proxy for token limits for simplicity)
-RESEARCH_CONTEXT_TRUNCATION_CHAR_LIMIT = 300000 # Truncate research added to prompts
-SMOOTHING_PROMPT_INPUT_CHAR_LIMIT = 300000 # Truncate script text for smoothing prompt
+# Prompt Input Limits
+RESEARCH_CONTEXT_TRUNCATION_CHAR_LIMIT = 300000
+SMOOTHING_PROMPT_INPUT_CHAR_LIMIT = 300000
 
 # Output Paths
-BASE_OUTPUT_DIR = "output" # Base directory for all script runs
-LOG_FILE_NAME = "application_v2.8.log" # Name for the log file within each run directory
+BASE_OUTPUT_DIR = "output"
+LOG_FILE_NAME = "application_v2.8.log"
